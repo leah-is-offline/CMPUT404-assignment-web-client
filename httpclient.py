@@ -23,59 +23,73 @@ import socket
 import re
 # you may use urllib to encode data appropriately
 import urllib.parse
+from urllib.parse import urlparse
+import random
 
 def help():
+    # function to instruct user if format or request is wrong
     print("httpclient.py [GET/POST] [URL]\n")
 
 class HTTPResponse(object):
+    # class to make an object of an HTTP response
     def __init__(self, code=200, body=""):
         self.code = code
         self.body = body
 
 class HTTPClient(object):
-
+    # class to drive
+    
     def connect(self, host, port):
-        print('Creating TCP socket')
+        # function to connect to a host:port
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print("host: {h}".format(h = host))
-            print("port: {p}".format(p = port))
             self.socket.connect((host, port)) 
         except (socket.error):
-            #how new is this formatting (what version python?)
             print("Failed to create socket. Error code: {e}".format(e = socket.error))
             sys.exit()
-        print('Socket created successfully')
-        return self.socket
 
+ 
     def get_code(self, data):
-        code = "nothing here yet"
+        # function to get status code from an HTTP response
+        print(data)
+        code = data.split('\n')[0]
+        code = code.split(' ')[1]
         print("code: {c}".format(c = code))
-        #return code
-        return None
+        try:
+            code = (int(code))
+        except:
+            code = 500
+            
+        return code #only likes integers
+    
 
     def get_headers(self,data):
-        headers = "nothing here yet"
+        # function to parse headers from a HTTP response
+        headers = data.split('\r\n\r\n')[0]
         print("headers: {h}".format(h = headers))
-        #return headers
-        return None
+        return headers
 
+        
     def get_body(self, data):
-        headers = "nothing here yet"
-        print("body: {b}".format(b = body))
-        #return body
-        return None
+        # function to parse body from a HTTP response
+        body = ''
+        body = data.split('\r\n\r\n')[1]
+        print('body: {b}'.format(b = body))
+        return body
+
     
     def sendall(self, data):
-        # all good
+        # function to encode and send data
         self.socket.sendall(data.encode('utf-8'))
+
         
     def close(self):
-        # all good
+        # function to close the socket
         self.socket.close()
 
-    # read everything from the socket
+
     def recvall(self, sock):
+        # function to read everything from the socket
         buffer = bytearray() #does conversion for you
         done = False
         while not done:
@@ -87,37 +101,132 @@ class HTTPClient(object):
         return buffer.decode('utf-8')
 
 
-    def GET(self, url, args=None):
-        #get host and port --> check urlib if it will do this for you
-        #connect
-        code = 500
-        body = ""
+    def get_port(self,o):
+        # function to get/set a port
+        if o.port is None:
+            if o.scheme == 'https':
+                port = 443
+            elif o.scheme == 'http':
+                port = 80
+            else:
+                port = 27600 + random.randint(1,100)
+        else:
+            port = o.port
+        return port
 
-        #self.close()
+
+    def get_host(self,o):
+        # function to get/set host
+        # function assumes that host is parsable (ex: run https//... --> doesnt work)
+        print('host {hn}'.format(hn = o.hostname))
+        if o.hostname is not None:
+            host = o.hostname
+        else:
+            host = self.get_url(o)
+        return host
+
+    def get_path(self,o):
+        # function to get/set path
+        print('path {p}'.format(p = o.path))
+        if o.path != '' and o.path is not None:
+            path = o.path
+        else:
+            path = "/"
+        return path
+
+
+    def format_get_request(self, path, host):
+        # CITATION: https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
+        #startline = method, path/url/(host:port)/*, HTTP version\r\n optional headers\r\n\r\n optional body
+
+        request =  "GET {p} HTTP/1.1\r\n".format(p = path)
+        request += "Host: {h}\r\nAccept: */*\r\n".format(h = host) #request headers
+        request += "Connection: Closed\r\n\r\n" #general header
+        return request
+    
+        
+    def GET(self, url, args=None):
+        # CITATION: https://docs.python.org/3/library/urllib.parse.html
+        o = urlparse(url)
+        
+        host = self.get_host(o)
+        port = self.get_port(o)
+        path = self.get_path(o)
+
+        self.connect(host,port)
+
+        request = self.format_get_request(path,host)
+        self.sendall(request)
+        
+        response = self.recvall(self.socket)
+        self.close()
+        
+        code = self.get_code(response)
+        body = self.get_body(response)
+        #print("response: {r}".format(r = response))
+        #print("code {c}".format(c = code))
+
         return HTTPResponse(code, body)
 
 
-    def POST(self, url, args=None):
-        code = 500
-        body = ""
+    def format_post_request(self, args, host, port, path):
+        # CITATION: https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
+        #startline = method, path/url/(host:port)/*, HTTP version\r\n optional headers\r\n\r\n optional body
         
-        #self.close()
+        request = "POST {p} HTTP/1.1\r\n".format(p=path) #startline
+        request += "Host: {h}\r\nAccept: */*\r\n".format(h=host) #request headers
+        request += "Connection: Closed\r\n" #general headers
+        
+        if args is None:
+            request += "Content-Length: 0\r\n"
+            request += "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
+        else:
+            # CITATION: https://docs.python.org/3/library/urllib.request.html#urllib-examples
+            # convert such lists of pairs into query strings
+            params = urllib.parse.urlencode(args,doseq=True)
+            request += "Content-Length: "+str(len(params))+"\r\n"
+            request += "Content-Type: application/x-www-form-urlencoded\r\n\r\n" #representation headers
+            request += "{p}".format(p=params)
+
+        return request
+        
+
+
+    def POST(self, url, args=None):
+        # CITATION https://docs.python.org/3/library/urllib.parse.html
+        o = urlparse(url)
+        
+        host = self.get_host(o)
+        port = self.get_port(o)
+        path = self.get_path(o)
+
+        self.connect(host,port)
+
+        request = self.format_post_request(args, host, port, path)
+        self.sendall(request)
+
+        response = self.recvall(self.socket)
+        self.close()
+        
+        code = self.get_code(response)
+        body = self.get_body(response)
+        #print("response: {r}".format(r = response))
+        #print("code {c}".format(c = code))
+
         return HTTPResponse(code, body)
 
 
     def command(self, url, command="GET", args=None):
-        print("commmand function")
-        if (command == "POST"):
+        if (command == 'POST'):
             return self.POST( url, args )
         else:
-            # GET also assumed if user puts in something other than POST or GET
-            return self.GET( url, args ) 
+            return self.GET( url, args )
+        
     
 if __name__ == "__main__":
-    # takes care of client command line args
-    # no more checking required? ("httpclient.py [GET/POST] [URL]\n")
     client = HTTPClient()
-    command = "GET" # assume GET if no method specified 
+    command = "GET" # assume GET if no method specified
+    print(sys.argv)
     if (len(sys.argv) <= 1):
         help()
         sys.exit(1)
